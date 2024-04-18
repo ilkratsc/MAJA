@@ -6,15 +6,15 @@ Install dependencies:
 pip install numpy loguru scipy zarr dask
 ```
 generate MC:
-python genY.py --n 18264 --p 18216 --p0 17216 --q 2 --dir MC --xfiles /nfs/scistore13/robingrp/human_data/GSM-preprocessed/final-zarr/std_methylation_chr22.zarr --scen 0
+python genY.py --n 10000 --p 40000 40000 --p0 39000 39000 --q 2 --dir MC --x xinput.zarr --scen 0
 ```
-n = individuals
-p = markers split per group
-p0 = markers set to 0 per group
+n = total number of individuals
+p = total number of markers split per group (currently only 1 or 2 groups are possible)
+p0 = number of markers set to 0 per group
 q = number of traits
-xfiles = path to genotype matrix files (/nfs/scistore13/robingrp/human_data/GSM-preprocessed/final-zarr/std_methylation_chr22.zarr)
-dir = path to directory where phenotype should be stored
-scen = 0
+x = path to genotype matrix files in zarr format
+dir = path to output directory
+scen = covariance scenario (can be 0,1,2) - see covariances below
 """
 
 import sys
@@ -26,7 +26,7 @@ import dask.array as da
 from loguru import logger
 
 
-def main(n, groups, groups0, q, scen, xfiles):
+def main(n, groups, groups0, q, scen, xfiles, dir):
 
     p = np.sum(groups)
     p0 = np.sum(groups0)
@@ -50,26 +50,43 @@ def main(n, groups, groups0, q, scen, xfiles):
     # covariances
     if q==2:
         var = np.array([
-            [[0.3, 0],[0, 0.5]],
-            [[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5)],[-0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5]],
-            [[0.3, +0.5*np.sqrt(0.3)*np.sqrt(0.5)],[+0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5]],
+            [
+                [[0.3, 0],[0, 0.5]],
+                [[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5)],[-0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5]],
+                [[0.3, +0.5*np.sqrt(0.3)*np.sqrt(0.5)],[+0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5]],
+            ],
+            [
+                [[0.5, 0],[0, 0.3]],
+                [[0.5, -0.5*np.sqrt(0.3)*np.sqrt(0.5)],[-0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.3]],
+                [[0.5, +0.5*np.sqrt(0.3)*np.sqrt(0.5)],[+0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.3]],
+            ]
             ])
-    if q==3:
+    elif q==3:
         var = np.array([
+            [
             [[0.3, 0, 0],[0, 0.5, 0], [0, 0, 0.1]],
             [[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), -0.5*np.sqrt(0.3)*np.sqrt(0.1)],[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5, -0.5*np.sqrt(0.3)*np.sqrt(0.1)], [-0.5*np.sqrt(0.3)*np.sqrt(0.1), -0.5*np.sqrt(0.5)*np.sqrt(0.1), 0.1]],
             [[0.3, +0.5*np.sqrt(0.3)*np.sqrt(0.5), +0.5*np.sqrt(0.3)*np.sqrt(0.1)],[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5, -0.5*np.sqrt(0.3)*np.sqrt(0.1)], [+0.5*np.sqrt(0.3)*np.sqrt(0.1), +0.5*np.sqrt(0.5)*np.sqrt(0.1), 0.1]],
+            ],
+            [
+            [[0.3, 0, 0],[0, 0.5, 0], [0, 0, 0.1]],
+            [[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), -0.5*np.sqrt(0.3)*np.sqrt(0.1)],[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5, -0.5*np.sqrt(0.3)*np.sqrt(0.1)], [-0.5*np.sqrt(0.3)*np.sqrt(0.1), -0.5*np.sqrt(0.5)*np.sqrt(0.1), 0.1]],
+            [[0.3, +0.5*np.sqrt(0.3)*np.sqrt(0.5), +0.5*np.sqrt(0.3)*np.sqrt(0.1)],[0.3, -0.5*np.sqrt(0.3)*np.sqrt(0.5), 0.5, -0.5*np.sqrt(0.3)*np.sqrt(0.1)], [+0.5*np.sqrt(0.3)*np.sqrt(0.1), +0.5*np.sqrt(0.5)*np.sqrt(0.1), 0.1]],
+            ]
             ])
+    else:
+        logger.info("Covariance for this number of traits is not set up.")
+        return
 
     for g in range(G):
-        logger.info(f"{g=}, {scen=}, {var[scen]=}")
+        logger.info(f"{g=}, {scen=}, {var[g, scen]=}")
         # calculate number of non-zero effects
         p1 = (groups[g]-groups0[g])
         # generate beta
         if p1 == 0:
             beta = np.zeros((groups0[g], q))
         else:
-            beta = np.concatenate([rng.multivariate_normal(np.zeros(q), var[scen]/p1, p1), np.zeros((groups0[g], q))])
+            beta = np.concatenate([rng.multivariate_normal(np.zeros(q), var[g, scen]/p1, p1), np.zeros((groups0[g], q))])
         rng.shuffle(beta)
         V = np.matmul(beta.T, beta)
         if g == 0:
@@ -131,6 +148,6 @@ if __name__ == "__main__":
         q = args.q, # number of traits
         scen = args.scen, # variance scenario
         xfiles = args.x, # path to xfiles
-        dir = args.dir
+        dir = args.dir,
     ) 
     logger.info("Done.")
